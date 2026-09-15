@@ -1,9 +1,11 @@
 """
-Tests for reconcile.py — each test case uses a fixture directory under
-tests/fixtures/<case>/ containing the five source CSV files, and mocks
-ProteinAuthority so no network calls are made.
-"""
+Tests for reconcile.py — self-contained (no on-disk fixtures, no network).
 
+Each test writes a tiny 5-file pack into a temp dir and patches the Authority HTTP
+layer (`Authority._http_json`) with canned EBI/ChEMBL JSON. This exercises the real
+response parsing, the secondary->primary index, ChEMBL-collision resolution and the
+conflict-direction logic — the parts most likely to break.
+"""
 from __future__ import annotations
 
 import json
@@ -13,316 +15,184 @@ from unittest.mock import patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Import reconcile from the project root
-# ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import reconcile as reconcile_mod
+import reconcile as R
 from reconcile import reconcile
 
-FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
-
-# ---------------------------------------------------------------------------
-# Mock ProteinAuthority helpers
-# ---------------------------------------------------------------------------
-
-EBI_API = "https://www.ebi.ac.uk/proteins/api/proteins"
-
-
-def _authority_entry(
-    primary: str,
-    gene_name: str,
-    *,
-    synonyms: list[str] | None = None,
-    organism: str = "Homo sapiens",
-    taxon_id: int = 9606,
-    protein_name: str = "",
-    secondary_accessions: list[str] | None = None,
-    queried: str | None = None,
-    merged_from: str | None = None,
-) -> dict:
-    """Build a deterministic authority response dict."""
-    result = {
-        "primary_accession": primary,
-        "secondary_accessions": secondary_accessions or [],
-        "gene_name": gene_name,
-        "gene_synonyms": synonyms or [],
-        "organism": organism,
-        "taxon_id": taxon_id,
-        "protein_name": protein_name,
-        "queried_accession": queried or primary,
-        "source": f"{EBI_API}/{queried or primary}",
-    }
-    if merged_from is not None:
-        result["merged_from"] = merged_from
-    return result
+HDR = {
+    "uniprot": "accession,entry_name,gene_names,protein_name,organism,reviewed,length,database",
+    "chembl": "chembl_id,pref_name,target_type,accession,gene_symbol,organism,tax_id,target_confidence",
+    "bindingdb": "target_name,species,uniprot_id,gene_symbol,assay_count,binding_type",
+    "internal": "internal_id,registered_name,gene_symbol,source_db,external_id,uniprot_ref,registered_by,registration_date,status",
+    "publications": "pmid,target_mention,context_sentence,journal,year",
+}
 
 
-def _make_mock_authority_class(responses: dict):
-    """Return a class whose instances behave like ProteinAuthority but use
-    a fixed lookup table instead of HTTP calls."""
-
-    class _MockAuthority:
-        def __init__(self):
-            pass
-
-        def resolve_batch(self, accessions: list[str]) -> None:
-            pass  # no-op; everything is in the table
-
-        def resolve(self, accession: str) -> dict | None:
-            return responses.get(accession.strip())
-
-    return _MockAuthority
+def write_pack(tmp_path: Path, rows: dict[str, list[str]]) -> Path:
+    for src, hdr in HDR.items():
+        body = [hdr] + rows.get(src, [])
+        (tmp_path / f"source_{src}.csv").write_text("\n".join(body) + "\n")
+    return tmp_path
 
 
-# ---------------------------------------------------------------------------
-# Shared assertions
-# ---------------------------------------------------------------------------
-
-def _assert_valid_output(result: dict) -> None:
-    """Check that the reconcile output has the expected top-level shape."""
-    assert isinstance(result, dict)
-    assert "unique_target_count" in result
-    assert "golden_records" in result
-    assert "findings" in result
-    assert isinstance(result["unique_target_count"], int)
-    assert isinstance(result["golden_records"], list)
-    assert isinstance(result["findings"], list)
-    assert result["unique_target_count"] == len(result["golden_records"])
-
-    # Every golden record must have gene, primary_accession, sources
-    for gr in result["golden_records"]:
-        assert "gene" in gr
-        assert "primary_accession" in gr
-        assert "sources" in gr
-
-    # Every finding must have observed and correct
-    for f in result["findings"]:
-        assert "observed" in f, f"Finding missing 'observed': {f}"
-        assert "correct" in f, f"Finding missing 'correct': {f}"
-        assert "classification" in f, f"Finding missing 'classification': {f}"
-
-    # Verify JSON-serialisable
-    json.dumps(result)
+# ---- canned authority ----------------------------------------------------
+def ebi(acc, gene, prot, synonyms=None, taxon=9606, organism="Homo sapiens", secondary=None):
+    return {"accession": acc,
+            "gene": [{"name": {"value": gene}, "synonyms": [{"value": s} for s in (synonyms or [])]}],
+            "organism": {"taxonomy": taxon, "names": [{"type": "scientific", "value": organism}]},
+            "protein": {"recommendedName": {"fullName": {"value": prot}}},
+            "secondaryAccession": secondary or []}
 
 
-# ===================================================================
-# Test cases
-# ===================================================================
+EBI_DB = {
+    "P00533": ebi("P00533", "EGFR", "Epidermal growth factor receptor"),
+    "P38398": ebi("P38398", "BRCA1", "Breast cancer type 1 susceptibility protein"),
+    "P04637": ebi("P04637", "TP53", "Cellular tumor antigen p53"),
+    "P28482": ebi("P28482", "MAPK1", "Mitogen-activated protein kinase 1", synonyms=["ERK", "PRKM2"]),
+    "P10828": ebi("P10828", "THRB", "Thyroid hormone receptor beta", synonyms=["ERBA2", "NR1A2", "THR1"]),
+    "P29317": ebi("P29317", "EPHA2", "Ephrin type-A receptor 2", secondary=["B5A968"]),
+    "Q13946": ebi("Q13946", "PDE7A", "High affinity cAMP-specific phosphodiesterase 7A"),
+    "Q9Y233": ebi("Q9Y233", "PDE10A", "cGMP phosphodiesterase 10A"),
+    "P11309": ebi("P11309", "PIM1", "Serine/threonine-protein kinase pim-1"),
+    "Q9P1W9": ebi("Q9P1W9", "PIM2", "Serine/threonine-protein kinase pim-2"),
+}
+CHEMBL_DB = {
+    "CHEMBL9999": {"pref_name": "PDE7A", "target_components": [
+        {"accession": "Q13946",
+         "target_component_synonyms": [{"syn_type": "GENE_SYMBOL", "component_synonym": "PDE7A"}]}]},
+}
 
 
-class TestCleanBaseline:
-    """All three targets are consistent across every source.  No defects."""
-
-    RESPONSES = {
-        "P00533": _authority_entry(
-            "P00533", "EGFR",
-            protein_name="Epidermal growth factor receptor",
-        ),
-        "P38398": _authority_entry(
-            "P38398", "BRCA1",
-            protein_name="Breast cancer type 1 susceptibility protein",
-        ),
-        "P04637": _authority_entry(
-            "P04637", "TP53",
-            protein_name="Cellular tumor antigen p53",
-        ),
-    }
-
-    def test_clean_baseline(self):
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "clean_baseline")
-
-        _assert_valid_output(result)
-        assert result["unique_target_count"] == 3
-        assert len(result["golden_records"]) == 3
-        assert result["findings"] == [], (
-            f"Expected no findings, got: {result['findings']}"
-        )
+def fake_http_json(self, url):
+    if "/chembl/api/data/target/" in url:
+        cid = url.split("/target/")[1].split(".json")[0]
+        return ("ok", CHEMBL_DB[cid]) if cid in CHEMBL_DB else ("notfound", None)
+    if "/proteins?" in url or ("?" in url and "/proteins" in url):
+        return ("ok", [])  # gene-search fallback not needed here
+    acc = url.rstrip("/").rsplit("/", 1)[-1]
+    return ("ok", EBI_DB[acc]) if acc in EBI_DB else ("notfound", None)
 
 
-class TestWrongMapping:
-    """One source claims gene_symbol MAPK3 for accession P28482, but the
-    authority says the gene is MAPK1 and MAPK3 is not a synonym."""
-
-    RESPONSES = {
-        "P00533": _authority_entry(
-            "P00533", "EGFR",
-            protein_name="Epidermal growth factor receptor",
-        ),
-        "P38398": _authority_entry(
-            "P38398", "BRCA1",
-            protein_name="Breast cancer type 1 susceptibility protein",
-        ),
-        "P28482": _authority_entry(
-            "P28482", "MAPK1",
-            synonyms=["ERK2", "PRKM2"],
-            protein_name="Mitogen-activated protein kinase 1",
-        ),
-    }
-
-    def test_wrong_mapping_detected(self):
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "wrong_mapping")
-
-        _assert_valid_output(result)
-        assert result["unique_target_count"] == 3
-
-        wrong = [
-            f for f in result["findings"]
-            if f["classification"] == "wrong mapping"
-        ]
-        assert len(wrong) >= 1, (
-            f"Expected at least one 'wrong mapping' finding, got: {result['findings']}"
-        )
-        # The observed value should reference MAPK3, the correct should be MAPK1
-        wm = wrong[0]
-        assert "MAPK3" in wm["observed"]
-        assert "MAPK1" in wm["correct"] or wm["gene"] == "MAPK1"
+def run(tmp_path, rows):
+    write_pack(tmp_path, rows)
+    with patch.object(R.Authority, "_http_json", fake_http_json):
+        return reconcile(tmp_path)
 
 
-class TestStaleLabel:
-    """One source uses the old symbol ERBA2 for accession P10828, which the
-    authority lists as a known synonym of THRB."""
-
-    RESPONSES = {
-        "P00533": _authority_entry(
-            "P00533", "EGFR",
-            protein_name="Epidermal growth factor receptor",
-        ),
-        "P38398": _authority_entry(
-            "P38398", "BRCA1",
-            protein_name="Breast cancer type 1 susceptibility protein",
-        ),
-        "P10828": _authority_entry(
-            "P10828", "THRB",
-            synonyms=["ERBA2", "THR1", "NR1A2", "THRB1"],
-            protein_name="Thyroid hormone receptor beta",
-        ),
-    }
-
-    def test_stale_label_detected(self):
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "stale_label")
-
-        _assert_valid_output(result)
-        assert result["unique_target_count"] == 3
-
-        stale = [
-            f for f in result["findings"]
-            if f["classification"] == "stale-but-valid label"
-        ]
-        assert len(stale) >= 1, (
-            f"Expected at least one 'stale-but-valid label' finding, "
-            f"got: {result['findings']}"
-        )
-        sl = stale[0]
-        assert "ERBA2" in sl["observed"]
-        assert "THRB" in sl["correct"] or sl["gene"] == "THRB"
+def assert_contract(res):
+    assert set(res) == {"unique_target_count", "golden_records", "findings"}
+    assert res["unique_target_count"] == len(res["golden_records"])
+    for g in res["golden_records"]:
+        assert g["gene"] and g["primary_accession"] and g["sources"]
+    for f in res["findings"]:
+        for k in ("gene", "observed", "correct", "retrieved_evidence",
+                  "evidence_source", "severity", "classification"):
+            assert k in f and f[k] != "", f"missing {k}: {f}"
+    json.dumps(res)  # serialisable
 
 
-class TestDuplicate:
-    """Accessions P29317 and B5A968 both resolve to primary P29317 (EPHA2).
-    B5A968 is neither merged nor secondary -- it is a duplicate identity."""
-
-    RESPONSES = {
-        "P00533": _authority_entry(
-            "P00533", "EGFR",
-            protein_name="Epidermal growth factor receptor",
-        ),
-        "P29317": _authority_entry(
-            "P29317", "EPHA2",
-            protein_name="Ephrin type-A receptor 2",
-        ),
-        "B5A968": _authority_entry(
-            "P29317", "EPHA2",
-            queried="B5A968",
-            protein_name="Ephrin type-A receptor 2",
-        ),
-    }
-
-    def test_duplicate_identity_detected(self):
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "duplicate")
-
-        _assert_valid_output(result)
-        # Both accessions collapse to one primary, so 2 unique targets
-        assert result["unique_target_count"] == 2, (
-            f"Expected 2 unique targets (EGFR + EPHA2), "
-            f"got {result['unique_target_count']}"
-        )
-
-        dupes = [
-            f for f in result["findings"]
-            if f["classification"] == "duplicate identity"
-        ]
-        assert len(dupes) >= 1, (
-            f"Expected at least one 'duplicate identity' finding, "
-            f"got: {result['findings']}"
-        )
+CLEAN = {
+    "uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot",
+                "P38398,BRCA1_HUMAN,BRCA1,BRCA1 protein,Homo sapiens,reviewed,1863,Swiss-Prot",
+                "P04637,P53_HUMAN,TP53,Cellular tumor antigen p53,Homo sapiens,reviewed,393,Swiss-Prot"],
+    "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9",
+               "CHEMBL3217,BRCA1,SINGLE PROTEIN,P38398,BRCA1,Homo sapiens,9606,9",
+               "CHEMBL4096,p53,SINGLE PROTEIN,P04637,TP53,Homo sapiens,9606,9"],
+    "bindingdb": ["EGFR,Homo sapiens,P00533,EGFR,1500,Ki", "BRCA1,Homo sapiens,P38398,BRCA1,200,IC50"],
+    "internal": ["INT001,EGFR,EGFR,chembl,CHEMBL203,P00533,jdoe,2024-01-15,active"],
+    "publications": ["12345678,EGFR,EGFR is overexpressed in cancers,Nature,2023"],
+}
 
 
-class TestHarmlessVariance:
-    """Species listed as 'Homo sapiens', 'H. sapiens', 'human' across
-    sources.  Authority confirms taxon 9606.  No findings expected."""
-
-    RESPONSES = {
-        "P00533": _authority_entry(
-            "P00533", "EGFR",
-            protein_name="Epidermal growth factor receptor",
-        ),
-    }
-
-    def test_no_findings(self):
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "harmless_variance")
-
-        _assert_valid_output(result)
-        assert result["unique_target_count"] == 1
-        assert result["findings"] == [], (
-            f"Expected no findings for harmless organism variance, "
-            f"got: {result['findings']}"
-        )
+def test_clean_baseline(tmp_path):
+    r = run(tmp_path, CLEAN)
+    assert_contract(r)
+    assert r["unique_target_count"] == 3
+    assert r["findings"] == [], r["findings"]
 
 
-class TestPmidTrap:
-    """Publications carry pmid values -- they should NOT be fetched against
-    the protein authority or produce any findings."""
+def test_wrong_mapping_symbol_direction(tmp_path):
+    rows = {"uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot",
+                        "P28482,MK01_HUMAN,MAPK1,Mitogen-activated protein kinase 1,Homo sapiens,reviewed,360,Swiss-Prot"],
+            "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9",
+                       "CHEMBL4040,MAP kinase,SINGLE PROTEIN,P28482,MAPK3,Homo sapiens,9606,9"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    wm = [f for f in r["findings"] if f["classification"] == "wrong mapping"]
+    assert wm and "MAPK3" in wm[0]["observed"] and ("MAPK1" in wm[0]["correct"] or wm[0]["gene"] == "MAPK1")
 
-    RESPONSES = {
-        "P00533": _authority_entry(
-            "P00533", "EGFR",
-            protein_name="Epidermal growth factor receptor",
-        ),
-    }
 
-    def test_pmids_not_flagged(self):
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "pmid_trap")
+def test_stale_label_symbol(tmp_path):
+    rows = {"uniprot": ["P10828,THRB_HUMAN,THRB,Thyroid hormone receptor beta,Homo sapiens,reviewed,461,Swiss-Prot"],
+            "chembl": ["CHEMBL1940,Thyroid hormone receptor beta,SINGLE PROTEIN,P10828,ERBA2,Homo sapiens,9606,9"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    assert any(f["classification"] == "stale-but-valid label" and "ERBA2" in f["observed"] and "THRB" in f["correct"]
+               for f in r["findings"]), r["findings"]
 
-        _assert_valid_output(result)
-        assert result["unique_target_count"] == 1
-        assert result["findings"] == [], (
-            f"PMIDs should not generate findings, got: {result['findings']}"
-        )
 
-    def test_publications_assigned_to_golden_record(self):
-        """The publication rows should be assigned to the EGFR golden record."""
-        MockAuth = _make_mock_authority_class(self.RESPONSES)
-        with patch.object(reconcile_mod, "ProteinAuthority", MockAuth):
-            result = reconcile(FIXTURES_DIR / "pmid_trap")
+def test_duplicate_identity(tmp_path):
+    rows = {"uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot",
+                        "P29317,EPHA2_HUMAN,EPHA2,Ephrin type-A receptor 2,Homo sapiens,reviewed,976,Swiss-Prot"],
+            "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9",
+                       "CHEMBL2068,Ephrin type-A receptor 2,SINGLE PROTEIN,P29317,EPHA2,Homo sapiens,9606,9",
+                       "CHEMBL2068,Ephrin type-A receptor 2,SINGLE PROTEIN,B5A968,EPHA2,Homo sapiens,9606,8"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    assert r["unique_target_count"] == 2  # EGFR + EPHA2 (B5A968 collapses into P29317)
+    assert any(f["classification"] == "duplicate identity" and f["observed"] == "B5A968" and f["correct"] == "P29317"
+               for f in r["findings"]), r["findings"]
+    assert not any(f["classification"] == "stale-but-valid label" and f["observed"] == "B5A968"
+                   for f in r["findings"])  # no double-report
 
-        egfr_records = [
-            gr for gr in result["golden_records"]
-            if gr["gene"] == "EGFR"
-        ]
-        assert len(egfr_records) == 1
-        assert "publications" in egfr_records[0]["sources"]
+
+def test_harmless_variance_no_findings(tmp_path):
+    rows = {"uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot"],
+            "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,H. sapiens,9606,9"],
+            "bindingdb": ["Epidermal growth factor receptor,human,P00533,EGFR,1500,Ki"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    assert r["unique_target_count"] == 1 and r["findings"] == []
+
+
+def test_pmid_trap(tmp_path):
+    rows = {"uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot"],
+            "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9"],
+            "publications": ["99990001,EGFR,Targeting EGFR in NSCLC patients,Lancet,2024",
+                             "99990002,EGFR,EGFR amplification in glioblastoma,Neuro-Oncology,2023"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    assert r["findings"] == [], r["findings"]  # pmids never flagged
+    egfr = [g for g in r["golden_records"] if g["gene"] == "EGFR"][0]
+    assert "publications" in egfr["sources"]
+
+
+def test_chembl_collision_flags_only_intruder(tmp_path):
+    rows = {"uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot",
+                        "Q13946,PDE7A_HUMAN,PDE7A,High affinity cAMP-specific phosphodiesterase 7A,Homo sapiens,reviewed,482,Swiss-Prot",
+                        "Q9Y233,PDE10_HUMAN,PDE10A,cGMP phosphodiesterase 10A,Homo sapiens,reviewed,779,Swiss-Prot"],
+            "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9",
+                       "CHEMBL9999,PDE7A,SINGLE PROTEIN,Q13946,PDE7A,Homo sapiens,9606,9",
+                       "CHEMBL9999,PDE10A,SINGLE PROTEIN,Q9Y233,PDE10A,Homo sapiens,9606,8"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    wm = [f for f in r["findings"] if f["classification"] == "wrong mapping"]
+    assert len(wm) == 1, wm                       # only the intruder
+    assert "Q9Y233" in wm[0]["observed"] and "Q13946" in wm[0]["correct"]
+    assert "chembl" in wm[0]["evidence_source"]
+    assert not any("Q13946" in f["observed"] for f in wm)  # correct PDE7A row not flagged
+
+
+def test_conflict_accession_direction(tmp_path):
+    # Row labeled PIM1 with a PIM1 pref_name but PIM2's accession -> the ACCESSION is the defect.
+    rows = {"uniprot": ["P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot",
+                        "P11309,PIM1_HUMAN,PIM1,Serine/threonine-protein kinase pim-1,Homo sapiens,reviewed,313,Swiss-Prot"],
+            "chembl": ["CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9",
+                       "CHEMBL2147,Serine/threonine-protein kinase pim-1,SINGLE PROTEIN,Q9P1W9,PIM1,Homo sapiens,9606,7"]}
+    r = run(tmp_path, rows)
+    assert_contract(r)
+    wm = [f for f in r["findings"] if f["classification"] == "wrong mapping"]
+    assert wm, r["findings"]
+    assert "Q9P1W9" in wm[0]["observed"] and wm[0]["correct"] == "P11309" and wm[0]["gene"] == "PIM1"

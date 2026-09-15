@@ -5,6 +5,7 @@ __pycache__/
 .eggs/
 build/
 dist/
+.pytest_cache/
 
 # Virtual environments
 .venv/
@@ -14,6 +15,9 @@ env/
 # Tool output (JSON envelopes, scratch runs)
 output/
 *.out.json
+run.stdout.json
+run.stderr.log
+run.*
 
 # Caches (e.g. cached authority responses)
 .cache/
