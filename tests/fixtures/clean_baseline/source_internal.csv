@@ -1,4 +1,0 @@
-internal_id,registered_name,gene_symbol,source_db,external_id,uniprot_ref,registered_by,registration_date,status
-INT001,EGFR,EGFR,chembl,CHEMBL203,P00533,jdoe,2024-01-15,active
-INT002,BRCA1,BRCA1,chembl,CHEMBL3217,P38398,jdoe,2024-01-15,active
-INT003,TP53,TP53,chembl,CHEMBL4096,P04637,jdoe,2024-01-15,active

@@ -10,6 +10,29 @@ It does not solve the challenge — it makes the challenge implementable by anyo
 
 ---
 
+## ✅ Solution status
+
+This repo contains the **completed** tool. It resolves against the nominated authority (EBI
+Proteins API) and finishes the exam pack in **~30 s** (budget: 5 min).
+
+```bash
+python reconcile.py target-data/exam      # prints the contract JSON to stdout
+python -m pytest tests/ -q                # 8 tests, self-contained, no network
+```
+
+On `target-data/exam/` it produces **609 golden records** and **55 findings** (3 wrong mappings,
+2 duplicate identities, 50 stale-but-valid labels) — every finding NAILED (carries both
+`observed` and `correct`) and evidenced against the authority.
+
+**How it resolves identity (worth knowing):** obsolete/secondary UniProt accessions 404 on the
+EBI direct endpoint, so the tool resolves every accession once, builds a **secondary→primary
+index** from the `secondaryAccession` field of the primaries it retrieves, and resolves the 404s
+*through EBI itself* — no second data source is needed on the exam. `rest.uniprot.org` remains
+only as a rare, loudly-logged fallback. ChEMBL (same host as EBI) is the authority for
+ChEMBL-ID collisions. Output is deterministic and finding order is stable.
+
+---
+
 ## ⚠️ Read this first — five things it's easy to miss
 
 These are non-negotiable and several of them live *only* inside
@@ -49,9 +72,8 @@ the-golden-target/
 ├── requirements.txt              ← dependencies (stdlib-only — no third-party packages)
 ├── .gitignore                    ← standard ignores (keeps target-data/ tracked)
 ├── tests/
-│   ├── README.md                 ← how to self-validate before the exam (fixtures, negative tests)
-│   ├── test_reconcile.py         ← 8 tests with mocked API across 6 fixture scenarios
-│   └── fixtures/                 ← synthetic test packs (clean, wrong-mapping, stale, duplicate, etc.)
+│   ├── README.md                 ← how the test suite works + what each case asserts
+│   └── test_reconcile.py         ← 8 self-contained tests (HTTP layer mocked; no network)
 ├── resources/
 │   ├── data-context.md           ← domain + data background: what the 5 sources are, biology, MDM/DQ framing, glossary
 │   ├── BRIDGE 2021 Q2 Seminar - Big Picture Drug Discovery.pdf   ← Lilly drug-discovery pipeline colour
@@ -217,8 +239,8 @@ this — the source rows are internally consistent, so nothing looks wrong until
 | The data to run against | `target-data/exam/*.csv` **(read-only)** |
 | **Full hand-off brief for an implementing agent** | **`AGENT_INSTRUCTIONS.md`** |
 | How to package & submit the three artifacts + final checklist | `SUBMISSION.md` |
-| The approach-summary template (7 questions) to fill in | `approach-summary.md` |
-| The tool entry-point scaffold to implement | `reconcile.py` |
+| The completed approach summary (artifact #3, 7 questions) | `approach-summary.md` |
+| The reconciliation tool (entry point) | `reconcile.py` |
 | How to self-validate the tool before the exam | `tests/README.md` |
 
 ---

@@ -29,8 +29,7 @@ reconcile.py            # tool entry point
 agent_config.json       # grading agent configuration
 requirements.txt        # dependencies (stdlib-only)
 tests/                  # self-validation (see tests/README.md)
-  test_reconcile.py     # 8 tests with mocked API
-  fixtures/             # synthetic test packs
+  test_reconcile.py     # 8 self-contained tests (HTTP layer mocked; no network)
 README.md               # index / contract
 challenge-brief.md      # official brief
 approach-summary.md     # artifact #3 (below)
