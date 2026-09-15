@@ -1,0 +1,4 @@
+accession,entry_name,gene_names,protein_name,organism,reviewed,length,database
+P00533,EGFR_HUMAN,EGFR,Epidermal growth factor receptor,Homo sapiens,reviewed,1210,Swiss-Prot
+P38398,BRCA1_HUMAN,BRCA1,Breast cancer type 1 susceptibility protein,Homo sapiens,reviewed,1863,Swiss-Prot
+P10828,THRB_HUMAN,THRB,Thyroid hormone receptor beta,Homo sapiens,reviewed,461,Swiss-Prot

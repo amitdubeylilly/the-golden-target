@@ -1,0 +1,4 @@
+chembl_id,pref_name,target_type,accession,gene_symbol,organism,tax_id,target_confidence
+CHEMBL203,EGFR,SINGLE PROTEIN,P00533,EGFR,Homo sapiens,9606,9
+CHEMBL3217,BRCA1,SINGLE PROTEIN,P38398,BRCA1,Homo sapiens,9606,9
+CHEMBL1940,Thyroid hormone receptor beta,SINGLE PROTEIN,P10828,ERBA2,Homo sapiens,9606,9

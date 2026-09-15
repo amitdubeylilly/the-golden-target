@@ -1,0 +1,4 @@
+pmid,target_mention,context_sentence,journal,year
+12345678,EGFR,EGFR is overexpressed in many cancers,Nature,2023
+23456789,BRCA1,BRCA1 mutations increase breast cancer risk,Cell,2023
+34567890,TP53,TP53 is the most commonly mutated gene in cancer,Science,2023
