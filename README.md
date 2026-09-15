@@ -43,12 +43,15 @@ the-golden-target/
 ├── challenge-brief.md            ← the verbatim official challenge brief (source of truth for the ask)
 ├── AGENT_INSTRUCTIONS.md         ← complete hand-off brief: give this to any agent to build & submit the whole thing
 ├── SUBMISSION.md                 ← how to package & submit the 3 artifacts + pre-submit checklist
-├── approach-summary.md           ← artifact #3 template (7 questions, ≤1,500 words) — fill in after building
-├── reconcile.py                  ← tool entry point — SCAFFOLD ONLY (no logic yet); `python reconcile.py <pack_dir>`
-├── requirements.txt              ← dependencies (keep stdlib-only if possible; any deps via JFrog Artifactory)
+├── approach-summary.md           ← artifact #3 (7 questions, ≤1,500 words)
+├── agent_config.json             ← grading agent configuration (run command, timeout, etc.)
+├── reconcile.py                  ← tool entry point; `python reconcile.py <pack_dir>`
+├── requirements.txt              ← dependencies (stdlib-only — no third-party packages)
 ├── .gitignore                    ← standard ignores (keeps target-data/ tracked)
 ├── tests/
-│   └── README.md                 ← how to self-validate before the exam (fixtures, negative tests)
+│   ├── README.md                 ← how to self-validate before the exam (fixtures, negative tests)
+│   ├── test_reconcile.py         ← 8 tests with mocked API across 6 fixture scenarios
+│   └── fixtures/                 ← synthetic test packs (clean, wrong-mapping, stale, duplicate, etc.)
 ├── resources/
 │   ├── data-context.md           ← domain + data background: what the 5 sources are, biology, MDM/DQ framing, glossary
 │   ├── BRIDGE 2021 Q2 Seminar - Big Picture Drug Discovery.pdf   ← Lilly drug-discovery pipeline colour

@@ -25,9 +25,12 @@ Must be true of the repo:
 
 Suggested layout in this scaffold:
 ```
-reconcile.py            # tool entry point (scaffold — logic to be implemented)
-requirements.txt        # dependencies (resolve via JFrog Artifactory — see note below)
-tests/                  # self-validation before the exam (see tests/README.md)
+reconcile.py            # tool entry point
+agent_config.json       # grading agent configuration
+requirements.txt        # dependencies (stdlib-only)
+tests/                  # self-validation (see tests/README.md)
+  test_reconcile.py     # 8 tests with mocked API
+  fixtures/             # synthetic test packs
 README.md               # index / contract
 challenge-brief.md      # official brief
 approach-summary.md     # artifact #3 (below)
