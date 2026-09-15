@@ -28,5 +28,5 @@ run.*
 .idea/
 .vscode/
 
-# NOTE: do NOT ignore target-data/ — it is the read-only validation ground truth and
+# NOTE: do NOT ignore data/ — it is the read-only validation ground truth and
 # should remain in the repo, unmodified.

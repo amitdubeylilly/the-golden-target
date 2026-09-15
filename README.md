@@ -16,11 +16,11 @@ This repo contains the **completed** tool. It resolves against the nominated aut
 Proteins API) and finishes the exam pack in **~30 s** (budget: 5 min).
 
 ```bash
-python reconcile.py target-data/exam      # prints the contract JSON to stdout
+python reconcile.py data/exam      # prints the contract JSON to stdout
 python -m pytest tests/ -q                # 8 tests, self-contained, no network
 ```
 
-On `target-data/exam/` it produces **609 golden records** and **55 findings** (3 wrong mappings,
+On `data/exam/` it produces **609 golden records** and **55 findings** (3 wrong mappings,
 2 duplicate identities, 50 stale-but-valid labels) — every finding NAILED (carries both
 `observed` and `correct`) and evidenced against the authority.
 
@@ -36,12 +36,12 @@ ChEMBL-ID collisions. Output is deterministic and finding order is stable.
 ## ⚠️ Read this first — five things it's easy to miss
 
 These are non-negotiable and several of them live *only* inside
-`target-data/verification_starter.md` (a read-only file that's easy to overlook). They are
+`data/verification_starter.md` (a read-only file that's easy to overlook). They are
 surfaced here so nobody builds the wrong thing.
 
 1. **A hidden dataset is what actually gets scored.** Your tool is run on a second,
    **unseen dataset with the same schema**, and *all objective points are measured there*.
-   → Do **not** hardcode or overfit to the visible `target-data/exam/` rows. The logic must
+   → Do **not** hardcode or overfit to the visible `data/exam/` rows. The logic must
    generalise.
 2. **5-minute runtime budget per pack.** The tool must finish each pack within **5 minutes**
    when graded. → Batch/cache authority lookups; avoid naive per-row slow network calls.
@@ -52,7 +52,7 @@ surfaced here so nobody builds the wrong thing.
    numbers, not PubMed IDs**. Some collide with real, unrelated PubMed papers. → **Never
    fetch them, never flag them.** Resolve ambiguous literature mentions from the shipped
    `context_sentence` text only.
-5. **`target-data/` is read-only ground truth. Do not modify anything under it.** It is the
+5. **`data/` is read-only ground truth. Do not modify anything under it.** It is the
    source you validate against. Re-verify findings against the authority *at submission time*,
    because reference databases evolve.
 
@@ -70,7 +70,7 @@ the-golden-target/
 ├── agent_config.json             ← grading agent configuration (run command, timeout, etc.)
 ├── reconcile.py                  ← tool entry point; `python reconcile.py <pack_dir>`
 ├── requirements.txt              ← dependencies (stdlib-only — no third-party packages)
-├── .gitignore                    ← standard ignores (keeps target-data/ tracked)
+├── .gitignore                    ← standard ignores (keeps data/ tracked)
 ├── tests/
 │   ├── README.md                 ← how the test suite works + what each case asserts
 │   └── test_reconcile.py         ← 8 self-contained tests (HTTP layer mocked; no network)
@@ -78,7 +78,7 @@ the-golden-target/
 │   ├── data-context.md           ← domain + data background: what the 5 sources are, biology, MDM/DQ framing, glossary
 │   ├── BRIDGE 2021 Q2 Seminar - Big Picture Drug Discovery.pdf   ← Lilly drug-discovery pipeline colour
 │   └── Discovery onboarding June2024v2.pptx                      ← Lilly discovery-phase / milestone colour
-└── target-data/                  ← READ-ONLY. Do not modify. Validation ground truth.
+└── data/                  ← READ-ONLY. Do not modify. Validation ground truth.
     ├── verification_starter.md   ← official tool contract + runtime budget + hidden-dataset rule
     └── exam/                      ← the data pack (~600+ targets, 3,000+ rows)
         ├── source_uniprot.csv
@@ -94,7 +94,7 @@ the-golden-target/
 
 1. **This README** — the map and the constraints.
 2. **`challenge-brief.md`** — the full official ask, scoring, and submission requirements.
-3. **`target-data/verification_starter.md`** — the exact tool contract, runtime budget, and
+3. **`data/verification_starter.md`** — the exact tool contract, runtime budget, and
    the hidden-dataset rule (already summarised below, but read the original).
 4. **`resources/data-context.md`** — the domain: what UniProt/ChEMBL/BindingDB/the internal
    registry/the literature table are, why target identity is slippery, the defect taxonomy,
@@ -121,7 +121,7 @@ A command-line tool that:
 
 ## Tool contract (authoritative — build to this)
 
-Reconciled from `challenge-brief.md` **and** `target-data/verification_starter.md`. Where they
+Reconciled from `challenge-brief.md` **and** `data/verification_starter.md`. Where they
 differ, the fuller `verification_starter.md` shape wins (it adds `severity` + `classification`).
 
 ### Invocation
@@ -172,7 +172,7 @@ differ, the fuller `verification_starter.md` shape wins (it adds `severity` + `c
 
 ---
 
-## The data pack (`target-data/exam/`) — schemas at a glance
+## The data pack (`data/exam/`) — schemas at a glance
 
 Five source extracts of the same overlapping set of protein targets. Each uses its own IDs,
 naming style, and curation level, so they disagree. The natural join key is the **UniProt
@@ -233,10 +233,10 @@ this — the source rows are internally consistent, so nothing looks wrong until
 | Need | Open |
 |---|---|
 | The exact official ask, scoring, submission questions | `challenge-brief.md` |
-| The tool contract, runtime budget, hidden-dataset rule (original) | `target-data/verification_starter.md` |
+| The tool contract, runtime budget, hidden-dataset rule (original) | `data/verification_starter.md` |
 | What the databases are, the biology, defect taxonomy, glossary | `resources/data-context.md` |
 | Where "targets" sit in drug discovery (background colour) | `resources/*.pdf`, `resources/*.pptx` |
-| The data to run against | `target-data/exam/*.csv` **(read-only)** |
+| The data to run against | `data/exam/*.csv` **(read-only)** |
 | **Full hand-off brief for an implementing agent** | **`AGENT_INSTRUCTIONS.md`** |
 | How to package & submit the three artifacts + final checklist | `SUBMISSION.md` |
 | The completed approach summary (artifact #3, 7 questions) | `approach-summary.md` |
@@ -245,6 +245,6 @@ this — the source rows are internally consistent, so nothing looks wrong until
 
 ---
 *This repository is organised for handoff: `README.md` (this file) is the single entry point;
-`challenge-brief.md` and `target-data/verification_starter.md` are the authoritative sources of
-the ask and the contract; `resources/` holds the domain background. Nothing under `target-data/`
+`challenge-brief.md` and `data/verification_starter.md` are the authoritative sources of
+the ask and the contract; `resources/` holds the domain background. Nothing under `data/`
 should be modified.*
