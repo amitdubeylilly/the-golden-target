@@ -1,9 +1,0 @@
-{
-    "challenge_id": "the-golden-target",
-    "type": "python",
-    "runtime_version": "3.11",
-    "entry": "reconcile.py",
-    "run_command": "python reconcile.py {input}",
-    "requirements": "requirements.txt",
-    "timeout_seconds": 300
-}
