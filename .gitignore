@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool output (JSON envelopes, scratch runs)
+output/
+*.out.json
+
+# Caches (e.g. cached authority responses)
+.cache/
+*.cache
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# NOTE: do NOT ignore target-data/ — it is the read-only validation ground truth and
+# should remain in the repo, unmodified.

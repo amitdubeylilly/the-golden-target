@@ -1,0 +1,13 @@
+# Dependencies — The Golden Target
+#
+# RECOMMENDATION: keep this tool standard-library only (csv, json, argparse, urllib).
+# A zero-dependency tool is easiest to run within the 5-minute budget and on the grader's
+# environment, and avoids install friction entirely.
+#
+# LILLY POLICY: all packages must be resolved via JFrog Artifactory. Public PyPI/NPM are
+# prohibited. If you must add a dependency (e.g. an HTTP client instead of urllib),
+# configure pip to use the Lilly Artifactory index and pin the exact version below.
+# See: Artifactory | Developer Platform Front Door (for index URL + setup).
+#
+# Example (uncomment and pin if genuinely needed; installed FROM ARTIFACTORY, not PyPI):
+# requests==<pinned-version>
